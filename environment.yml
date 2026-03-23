@@ -1,0 +1,18 @@
+name: rag_milvus
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13.11
+  - pip
+  - pip:
+      - langchain
+      - langchain-ollama
+      - pymilvus
+      - langchain-milvus
+      - milvus-lite
+      - langchain-community
+      - langchain-openai
+      - pypdf
+      - fastapi
+      - uvicorn
+      - unstructured
