@@ -7,8 +7,8 @@ dependencies:
   - pip:
       - langchain
       - langchain-ollama
-      - pymilvus
-      - langchain-milvus
+      - pymilvus==2.5.18
+      - langchain-milvus==0.2.2
       - milvus-lite
       - langchain-community
       - langchain-openai
@@ -17,3 +17,5 @@ dependencies:
       - uvicorn
       - unstructured
       - python-multipart
+      - langchain-chroma
+      - chromadb
