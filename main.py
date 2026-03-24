@@ -1,22 +1,26 @@
-from fastapi import FastAPI, UploadFile
-from langchain_ollama import OllamaEmbeddings
 import uvicorn
-from pydantic import BaseModel
+from fastapi import FastAPI, UploadFile
+from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, SecretStr
-
-# 1. 引入 Chroma
-from langchain_chroma import Chroma
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
+from langchain_ollama import OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pydantic import BaseModel, SecretStr
+import logging
+
 import traceback
 import os
 
 
 app = FastAPI(title="RAG-Chroma")
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("rag-system")
 
 COLLECTION_NAME = "jiejie_test_v2"
 # 2. 设置 Chroma 向量数据库在本地保存的文件夹路径
@@ -57,15 +61,18 @@ text_splitter = RecursiveCharacterTextSplitter(
 @app.get("/text_embedding")
 def get_text_embedding(text: str):
     try:
+        logger.info("收到 text_embedding 请求，text_length=%s", len(text))
         vector = embeddings.embed_query(text)
         return {"embedding": vector}
     except Exception as e:
+        logger.exception("text_embedding 调用失败")
         return {"error": str(e)}
 
 
 @app.post("/upload")
 async def upload_file(file: UploadFile):
     try:
+        logger.info("收到 upload 请求，filename=%s", file.filename)
         file_content = await file.read()
 
         # 兼容不同编码格式的纯文本文件
@@ -93,16 +100,15 @@ async def upload_file(file: UploadFile):
         # 4. 向量入库 (Chroma 会自动处理并保存到 persist_directory)
         try:
             vector_db.add_documents(documents)
-            print(f"成功将 {len(chunks)} 个数据块存入 ChromaDB!")
+            logger.info("上传完成，filename=%s, chunks=%s", file.filename, len(chunks))
         except Exception as db_err:
-            print("=== Chroma 入库报错 ===")
-            traceback.print_exc()
+            logger.exception("Chroma 入库失败，filename=%s", file.filename)
             return {"error": f"向量入库失败: {str(db_err)}"}
 
         return {"status": "success", "chunks_count": len(chunks)}
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("upload 接口发生未知错误，filename=%s", file.filename)
         return {"error": f"接口发生未知错误: {str(e)}"}
 
 
@@ -113,15 +119,20 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     query = request.query
-
     try:
+        logger.info("收到 chat 请求，query=%s", query)
+
         # 1. 从 Chroma 数据库中检索最相关的 Top-3 文档块
         # 这里的 k=3 表示返回 3 个最相关的 chunk
         docs = vector_db.similarity_search(query, k=3)
 
+        logger.info("检索到 %s 个相关文档", len(docs))
+        for doc in docs:
+            logger.info("相关文档: %s", doc.metadata.get("filename", "未知文件"))
+
         # 2. 【第一重保险】：如果数据库里完全没有数据，直接用大模型本身的能力
         if not docs:
-            print("知识库为空，直接调用大模型...")
+            logger.info("知识库为空，直接调用大模型")
             response = chatModel.invoke(query)
             return {
                 "answer": response.content,
@@ -131,6 +142,8 @@ async def chat(request: ChatRequest):
 
         # 将检索到的文档内容拼接在一起，作为上下文
         context = "\n\n".join([doc.page_content for doc in docs])
+
+        logger.info("context=%s", context)
 
         # 提取相关文档的文件名，方便前端展示引用来源
         source_files = list(
@@ -150,11 +163,19 @@ async def chat(request: ChatRequest):
         """
 
         prompt = ChatPromptTemplate.from_template(prompt_template)
+        formatted_prompt = prompt.invoke({"context": context, "query": query})
+        logger.info("formatted_prompt=%s", formatted_prompt.messages[0].content)
 
         # 4. 构建 LangChain 运行链并执行
         chain = prompt | chatModel | StrOutputParser()
+        logger.info("chain 已创建，steps=%s", len(chain.steps))
 
         answer = chain.invoke({"context": context, "query": query})
+
+        logger.info(
+            "chat 完成，source=rag_or_llm, referenced_files=%s",
+            source_files,
+        )
 
         return {
             "answer": answer,
@@ -163,9 +184,9 @@ async def chat(request: ChatRequest):
         }
 
     except Exception as e:
-        traceback.print_exc()
+        logger.exception("chat 接口发生错误，query=%s", query)
         return {"error": f"对话接口发生错误: {str(e)}"}
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=9090)
+    uvicorn.run(app, host="0.0.0.0", port=9090, log_level="info", access_log=True)
