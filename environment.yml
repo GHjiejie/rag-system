@@ -19,3 +19,4 @@ dependencies:
       - python-multipart
       - langchain-chroma
       - chromadb
+      - python-dotenv

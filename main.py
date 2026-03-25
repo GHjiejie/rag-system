@@ -13,14 +13,41 @@ import logging
 import traceback
 import os
 
+from dotenv import load_dotenv
+
 
 app = FastAPI(title="RAG-Chroma")
 
+
+# 设置日志级别为INFO,修改默认的日志级别，不然的话info级别的日志不会被输出
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 logger = logging.getLogger("rag-system")
+
+
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    raise ValueError("缺少环境变量 OPENAI_API_KEY")
+
+openai_base_url = os.getenv("OPENAI_BASE_URL")
+if not openai_base_url:
+    raise ValueError("缺少环境变量 OPENAI_BASE_URL")
+
+openai_model = os.getenv("OPENAI_MODEL")
+if not openai_model:
+    raise ValueError("缺少环境变量 OPENAI_MODEL")
+
+ollama_base_url = os.getenv("OLLAMA_BASE_URL")
+if not ollama_base_url:
+    raise ValueError("缺少环境变量 OLLAMA_BASE_URL")
+
+ollama_embedding_model = os.getenv("OLLAMA_EMBEDDING_MODEL")
+if not ollama_embedding_model:
+    raise ValueError("缺少环境变量 OLLAMA_EMBEDDING_MODEL")
+
 
 COLLECTION_NAME = "jiejie_test_v2"
 # 2. 设置 Chroma 向量数据库在本地保存的文件夹路径
@@ -28,18 +55,15 @@ CHROMA_PERSIST_DIR = "./chroma_data"
 
 # 初始化 Embedding 模型
 embeddings = OllamaEmbeddings(
-    model="bge-m3:567m",
-    base_url="http://localhost:11434",
+    model=ollama_embedding_model,
+    base_url=ollama_base_url,
     client_kwargs={"trust_env": False},
 )
 
 chatModel = ChatOpenAI(
-    model="gpt-5.4",
-    api_key=SecretStr(
-        "sk-846f1b178fbb2f6810f0cda48c69c9a7c2ffd29c8847887820bf7ee0a17a8945"
-    ),
-    # api_key=SecretStr(os.getenv("OPENAI_API_KEY", "")),
-    base_url="https://gmncode.cn/v1",  # 👈 重点：这里加上 /v1
+    model=openai_model,
+    api_key=SecretStr(openai_api_key),
+    base_url=openai_base_url,  # 👈 重点：这里加上 /v1
 )
 
 
@@ -164,11 +188,9 @@ async def chat(request: ChatRequest):
 
         prompt = ChatPromptTemplate.from_template(prompt_template)
         formatted_prompt = prompt.invoke({"context": context, "query": query})
-        logger.info("formatted_prompt=%s", formatted_prompt.messages[0].content)
 
         # 4. 构建 LangChain 运行链并执行
         chain = prompt | chatModel | StrOutputParser()
-        logger.info("chain 已创建，steps=%s", len(chain.steps))
 
         answer = chain.invoke({"context": context, "query": query})
 
